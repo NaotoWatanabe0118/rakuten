@@ -69,12 +69,25 @@ def check_stock_with_browser(sb, item: SearchItem) -> CartAddResult:
     )
     try:
         sb.open(url)
+        # Chrome の JSON ビューアは生 JSON を <pre> タグに描画する。
+        # body.innerText はビューア部分を含まない場合があるため <pre> を優先する。
         r = sb.driver.execute_cdp_cmd("Runtime.evaluate", {
-            "expression": "document.body.innerText",
+            "expression": """
+            (function() {
+                var pre = document.querySelector('pre');
+                if (pre && pre.textContent.trim()) return pre.textContent.trim();
+                return document.body.innerText.trim();
+            })()
+            """,
             "returnByValue": True,
         })
-        text = r.get("result", {}).get("value", "")
+        text = (r.get("result", {}).get("value") or "").strip()
+        logger.debug("[%s] cartAdd レスポンス (先頭300文字): %s", item.id, text[:300])
+        if not text:
+            raise StockCheckError(f"[{item.id}] 空のレスポンス（セッション期限切れの可能性）")
         data = _json.loads(text)
+    except StockCheckError:
+        raise
     except Exception as e:
         raise StockCheckError(f"[{item.id}] ブラウザ経由の在庫チェック失敗: {e}") from e
 
