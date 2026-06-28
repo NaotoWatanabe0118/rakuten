@@ -5,13 +5,13 @@ from pathlib import Path
 
 from src.browser import BrowserSession
 from src.config import load_config, setup_logging
-from src.exceptions import ConfigError, LoginError, StockCheckError
+from src.exceptions import ConfigError, StockCheckError
 from src.models import SearchItem
 from src.notifier import Notifier
 from src.purchaser import Purchaser
-from src.session import get_session, load_cookies, refresh_session
+from src.session import load_cookies
 from src.state_manager import StateManager
-from src.stock_checker import check_stock, is_session_expired
+from src.stock_checker import check_stock_with_browser
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +52,7 @@ def main() -> None:
     notifier = Notifier(config.discord_webhook_url)
     purchaser = Purchaser(config, state_manager, notifier)
 
-    # HTTP セッション（在庫チェック API 用）
-    try:
-        session = get_session(config)
-    except LoginError as e:
-        logger.error("初回ログインに失敗しました: %s", e)
-        raise SystemExit(1)
-
-    # ブラウザセッション（購入フロー用・常駐）
+    # ブラウザセッション（在庫チェック＋購入フロー兼用・常駐）
     cookies = load_cookies(config.cookies_file) or []
     browser = BrowserSession(config)
     browser.start()
@@ -79,13 +72,22 @@ def main() -> None:
             for item in searches:
                 item_state = state_manager.get_item_state(item.id)
 
-                # 購入済みまたは進行中はスキップ
                 if item_state.purchase_status in ("success", "in_progress"):
                     logger.debug("[%s] スキップ（purchase_status=%s）", item.id, item_state.purchase_status)
                     continue
 
+                # ブラウザが落ちていれば再起動
+                if not browser.is_alive():
+                    logger.warning("ブラウザが応答しません。再起動します")
+                    browser.stop()
+                    browser.start()
+                    cookies = load_cookies(config.cookies_file) or []
+                    purchaser._restore_cookies(browser.sb, cookies)
+                    purchaser._ensure_logged_in(browser.sb)
+                    last_login_check = time.time()
+
                 try:
-                    result = check_stock(session, item)
+                    result = check_stock_with_browser(browser.sb, item)
                 except StockCheckError as e:
                     state_manager.increment_errors(item.id)
                     errors = state_manager.get_item_state(item.id).consecutive_errors
@@ -101,31 +103,12 @@ def main() -> None:
                 )
                 state_manager.reset_errors(item.id)
 
-                # セッション切れ検出 → HTTP セッションを再取得
-                if is_session_expired(result):
-                    logger.warning("セッションが切れました。再ログインします")
-                    try:
-                        session = refresh_session(config)
-                        cookies = load_cookies(config.cookies_file) or []
-                    except LoginError as e:
-                        logger.error("再ログインに失敗しました: %s", e)
-                    continue
-
                 if not result.success:
                     continue
 
-                # 在庫検知 → ブラウザの健全性を確認してから購入フロー実行
+                # 在庫検知 → ブラウザは cartAdd 完了済み → そのまま購入フローへ
                 logger.info("[%s] 在庫を検知しました！購入を開始します", item.id)
                 notifier.notify_stock_detected(item, result)
-
-                if not browser.is_alive():
-                    logger.warning("ブラウザが応答しません。再起動します")
-                    browser.stop()
-                    browser.start()
-                    cookies = load_cookies(config.cookies_file) or []
-                    purchaser._restore_cookies(browser.sb, cookies)
-                    purchaser._ensure_logged_in(browser.sb)
-                    last_login_check = time.time()
 
                 purchase_result = purchaser.purchase_with_sb(item, browser.sb)
 

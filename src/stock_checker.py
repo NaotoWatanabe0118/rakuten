@@ -1,3 +1,4 @@
+import json as _json
 import logging
 from datetime import datetime
 
@@ -54,3 +55,42 @@ def check_stock(session: requests.Session, item: SearchItem) -> CartAddResult:
 
 def is_session_expired(result: CartAddResult) -> bool:
     return result.result_code in _SESSION_EXPIRED_CODES
+
+
+def check_stock_with_browser(sb, item: SearchItem) -> CartAddResult:
+    """常駐ブラウザ経由で在庫チェック（VPS IP ブロック回避・カート追加を兼ねる）。
+
+    resultCode=0 の場合、カートへの追加も同時に完了しているため
+    そのまま購入フローへ進める。
+    """
+    url = (
+        f"{CART_ADD_URL}"
+        f"?itemid={item.itemid}&shopid={item.shopid}&units={item.units}"
+    )
+    try:
+        sb.open(url)
+        r = sb.driver.execute_cdp_cmd("Runtime.evaluate", {
+            "expression": "document.body.innerText",
+            "returnByValue": True,
+        })
+        text = r.get("result", {}).get("value", "")
+        data = _json.loads(text)
+    except Exception as e:
+        raise StockCheckError(f"[{item.id}] ブラウザ経由の在庫チェック失敗: {e}") from e
+
+    result_code = data.get("resultCode", "")
+    result_message = data.get("resultMessage", "")
+    success = result_code == _SUCCESS_CODE
+
+    if success:
+        logger.info("[%s] 在庫あり（カート追加成功）: %s", item.id, item.name)
+    else:
+        logger.debug("[%s] 在庫なし: %s (resultCode=%s)", item.id, item.name, result_code)
+
+    return CartAddResult(
+        item_id=item.id,
+        success=success,
+        result_code=result_code,
+        result_message=result_message,
+        checked_at=datetime.utcnow(),
+    )
