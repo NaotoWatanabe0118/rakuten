@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 
 from seleniumbase import SB
 
@@ -7,19 +6,14 @@ from src.config import Config
 
 logger = logging.getLogger(__name__)
 
-# Chrome がクラッシュ時に残すロックファイル
-_CHROME_LOCK_FILES = [
-    "SingletonLock",
-    "SingletonCookie",
-    "SingletonSocket",
-]
-
 
 class BrowserSession:
     """購入フロー用の常駐ブラウザセッション。
 
     在庫検知前にブラウザを起動・ログインしておくことで、
     在庫検知後のブラウザ起動コスト（約14秒）をゼロにする。
+    user_data_dir は使用しない（クラッシュ後のプロファイル破損を防ぐため）。
+    Cookieは _restore_cookies で別途設定する。
     """
 
     def __init__(self, config: Config) -> None:
@@ -27,27 +21,19 @@ class BrowserSession:
         self._sb_ctx: SB | None = None
         self._sb = None
 
-    def _clean_chrome_locks(self) -> None:
-        """前回クラッシュで残ったChromeのシングルトンロックを削除する。"""
-        profile_dir = Path(self._config.chrome_user_data_dir)
-        if not profile_dir.exists():
-            return
-        for name in _CHROME_LOCK_FILES:
-            lock = profile_dir / name
-            if lock.exists():
-                try:
-                    lock.unlink()
-                    logger.info("Chrome ロックファイルを削除: %s", lock)
-                except Exception as e:
-                    logger.warning("Chrome ロックファイル削除失敗: %s: %s", lock, e)
-
     def start(self) -> None:
-        self._clean_chrome_locks()
         self._sb_ctx = SB(
             uc=True,
             headless=self._config.headless,
-            user_data_dir=self._config.chrome_user_data_dir,
-            chromium_arg="--no-sandbox --disable-dev-shm-usage --disable-gpu",
+            chromium_arg=(
+                "--no-sandbox "
+                "--disable-dev-shm-usage "
+                "--disable-gpu "
+                "--disable-software-rasterizer "
+                "--disable-extensions "
+                "--no-first-run "
+                "--disable-default-apps"
+            ),
         )
         self._sb = self._sb_ctx.__enter__()
         self._sb.driver.set_page_load_timeout(self._config.selenium_page_timeout)
