@@ -1,0 +1,14 @@
+.env
+data/stock_state.json
+data/cookies.json
+logs/
+downloaded_files/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
+Untitled

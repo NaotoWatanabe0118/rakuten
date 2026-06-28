@@ -1,0 +1,20 @@
+[
+  {
+    "id": "item-11280156",
+    "name": "サンプル商品A",
+    "itemid": "11280156",
+    "shopid": "217830",
+    "units": 1,
+    "enabled": true,
+    "notes": ""
+  },
+  {
+    "id": "item-11272250",
+    "name": "商品B",
+    "itemid": "11272250",
+    "shopid": "217830",
+    "units": 1,
+    "enabled": true,
+    "notes": ""
+  }
+]

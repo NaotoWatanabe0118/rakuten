@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  bot:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    container_name: rakuten-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - chrome_profile:/tmp/chrome_profile
+    environment:
+      - DISPLAY=:99
+      - HEADLESS=1
+    shm_size: "2gb"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  chrome_profile:
+    driver: local
