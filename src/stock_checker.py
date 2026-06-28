@@ -69,22 +69,30 @@ def check_stock_with_browser(sb, item: SearchItem) -> CartAddResult:
     )
     try:
         sb.open(url)
-        # Chrome の JSON ビューアは生 JSON を <pre> タグに描画する。
-        # body.innerText はビューア部分を含まない場合があるため <pre> を優先する。
+        current_url = sb.get_current_url()
+        logger.info("[%s] cartAdd 後 URL: %s", item.id, current_url)
+
+        # Chrome JSON ビューア(<pre>)・body.innerText・documentElement の順で試行
         r = sb.driver.execute_cdp_cmd("Runtime.evaluate", {
             "expression": """
             (function() {
                 var pre = document.querySelector('pre');
                 if (pre && pre.textContent.trim()) return pre.textContent.trim();
-                return document.body.innerText.trim();
+                var body = document.body.innerText.trim();
+                if (body) return body;
+                return document.documentElement.innerText.trim();
             })()
             """,
             "returnByValue": True,
         })
         text = (r.get("result", {}).get("value") or "").strip()
-        logger.debug("[%s] cartAdd レスポンス (先頭300文字): %s", item.id, text[:300])
+
+        # ページソースも取得して診断ログに出力
+        source = sb.get_page_source()
+        logger.info("[%s] page_source 先頭400文字: %s", item.id, source[:400])
+
         if not text:
-            raise StockCheckError(f"[{item.id}] 空のレスポンス（セッション期限切れの可能性）")
+            raise StockCheckError(f"[{item.id}] 空のレスポンス（URL: {current_url}）")
         data = _json.loads(text)
     except StockCheckError:
         raise
